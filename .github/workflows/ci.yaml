@@ -31,7 +31,7 @@ jobs:
       - name: Lint with golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.3.1
+          version: v2.4.0
   bundle:
     runs-on: ubuntu-latest
     steps:
@@ -87,6 +87,48 @@ jobs:
         run: |
           go list ./... | grep -v /e2e
           make test-ci
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Check helmchart generated
+        run: make generate-helmchart && git diff --exit-code
+      - name: Install Helm
+        run: |
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      - name: Verify Helm installation
+        run: helm version
+      - name: Lint Helm Chart
+        run: |
+          helm lint ./dist/chart
+      - name: Create k8s Kind Cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: helm-test
+          version: ${{ env.kind-version }}
+          config: ci/kind-cluster.config
+      - name: Install cert-manager via Helm
+        run: |
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+          helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set crds.enabled=true
+      - name: Wait for cert-manager to be ready
+        run: |
+          kubectl wait --namespace cert-manager --for=condition=available --timeout=300s deployment/cert-manager
+          kubectl wait --namespace cert-manager --for=condition=available --timeout=300s deployment/cert-manager-cainjector
+          kubectl wait --namespace cert-manager --for=condition=available --timeout=300s deployment/cert-manager-webhook
+      - name: Install Helm chart for project
+        run: |
+          helm install my-release ./dist/chart --create-namespace --namespace clickhouse-operator-system
+      - name: Check Helm release status
+        run: |
+          helm status my-release --namespace clickhouse-operator-system
 
   e2e-test:
     strategy:
