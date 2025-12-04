@@ -1,6 +1,45 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
 resources:
 - manifests.yaml
 - service.yaml
 
 configurations:
 - kustomizeconfig.yaml
+
+patches:
+  - patch: |-
+      # Add the --webhook-cert-path argument for configuring the webhook certificate path
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --webhook-cert-path=/tmp/k8s-server/serving-certs
+
+      # Add the port configuration for the webhook server
+      - op: add
+        path: /spec/template/spec/containers/0/ports/-
+        value:
+          containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+    target:
+      kind: Deployment
+  - patch: |-
+      - op: add
+        path: /spec/dnsNames/-
+        value: "WEBHOOK_SERVICE_NAME.NAMESPACE.svc"
+
+      - op: add
+        path: /spec/dnsNames/-
+        value: "WEBHOOK_SERVICE_NAME.NAMESPACE.svc.cluster.local"
+    target:
+      kind: Certificate
+
+replacements:
+  - sourceValue: "true"
+    targets:
+      - select:
+          kind: Deployment
+          name: controller-manager
+        fieldPaths:
+          - .spec.template.spec.containers.[name=manager].env.[name=ENABLE_WEBHOOKS].value
